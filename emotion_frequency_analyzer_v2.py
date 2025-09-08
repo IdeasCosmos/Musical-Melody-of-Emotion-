@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-EmotionFrequencyAnalyzer (v1)
-- Goertzel-based band power on sliding windows, Kalman denoising, SNR labeling
+EmotionFrequencyAnalyzerV2
+- FFT-based band power (numpy.rfft) with optional multiprocessing per window
+- Backward-compatible output with v1 analyzer
 """
 
-from typing import Dict, Tuple, Union, List
+from typing import Dict, Tuple, Union, List, Optional
 import numpy as np
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 EPS = 1e-12
 
@@ -33,27 +35,32 @@ class Kalman1D:
         return out
 
 
-def goertzel_power_block(x: np.ndarray, freqs: np.ndarray, fs: float) -> np.ndarray:
+def bandpower_via_rfft(x: np.ndarray, fs: float, bands: Dict[str, Tuple[float, float]], nfft: Optional[int] = None) -> Dict[str, float]:
     n = x.shape[0]
-    k = np.round((n * freqs) / fs).astype(int)
-    omega = (2.0 * np.pi * k) / n
-    cos_omega = np.cos(omega)
-    coeff = 2.0 * cos_omega
-    powers = np.zeros_like(freqs, dtype=np.float64)
-    for i, c in enumerate(coeff):
-        s_prev = 0.0
-        s_prev2 = 0.0
-        for sample in x:
-            s = sample + c * s_prev - s_prev2
-            s_prev2 = s_prev
-            s_prev = s
-        real = s_prev - s_prev2 * cos_omega[i]
-        imag = s_prev2 * np.sin(omega[i])
-        powers[i] = real * real + imag * imag
-    return powers
+    if nfft is None:
+        nfft = n
+    win = np.hanning(n)
+    xw = x * win
+    spec = np.fft.rfft(xw, n=nfft)
+    psd = (np.abs(spec) ** 2) / (np.sum(win ** 2) + EPS)
+    freqs = np.fft.rfftfreq(nfft, d=1.0 / fs)
+    band_powers: Dict[str, float] = {}
+    for name, (low, high) in bands.items():
+        idx = np.where((freqs >= low) & (freqs <= high))[0]
+        band_powers[name] = float(np.sum(psd[idx]) + EPS) if idx.size else 0.0
+    return band_powers
 
 
-class EmotionFrequencyAnalyzer:
+def _process_window_worker(args):
+    seg, fs, bands = args
+    if seg.ndim == 2:
+        avg = np.mean(seg, axis=0)
+    else:
+        avg = seg
+    return bandpower_via_rfft(avg, fs, bands, nfft=None)
+
+
+class EmotionFrequencyAnalyzerV2:
     def __init__(
         self,
         sampling_rate: int = 512,
@@ -62,11 +69,20 @@ class EmotionFrequencyAnalyzer:
         snr_threshold_db: float = 20.0,
         kalman_q: float = 1e-5,
         kalman_r: float = 1e-2,
+        use_multiprocessing: bool = False,
+        max_workers: int = 4,
+        min_windows_for_mp: int = 4,
     ):
         self.fs = sampling_rate
         self.window_size = window_size
         self.hop_size = hop_size
         self.snr_threshold_db = snr_threshold_db
+        self.kalman_q = kalman_q
+        self.kalman_r = kalman_r
+        self.use_multiprocessing = use_multiprocessing
+        self.max_workers = max_workers
+        self.min_windows_for_mp = min_windows_for_mp
+
         self.frequency_bands = {
             'delta': (0.5, 4.0),
             'theta': (4.0, 8.0),
@@ -74,15 +90,14 @@ class EmotionFrequencyAnalyzer:
             'beta': (13.0, 30.0),
             'gamma': (30.0, 100.0),
         }
-        self.emotion_coeffs = {
-            'joy': {'alpha': 0.35, 'beta': 0.0, 'gamma': -0.15},
-            'sadness': {'alpha': -0.25, 'theta': 0.20},
-            'anger': {'beta': 0.70, 'gamma': 0.50},
-        }
-        self.kalman_q = kalman_q
-        self.kalman_r = kalman_r
 
-    def _ensure_numpy(self, eeg_input: Union[np.ndarray, Dict[str, np.ndarray]]) -> Tuple[np.ndarray, List[str]]:
+        self.emotion_coeffs = {
+            'joy': {'alpha': 0.35, 'beta': 0.25},
+            'sadness': {'alpha': -0.25, 'theta': 0.20},
+            'anger': {'beta': 0.40, 'gamma': 0.25},
+        }
+
+    def _ensure_numpy(self, eeg_input: Union[np.ndarray, Dict[str, np.ndarray]]):
         if isinstance(eeg_input, dict):
             channels = list(eeg_input.keys())
             arrays = [np.asarray(eeg_input[ch], dtype=np.float64) for ch in channels]
@@ -112,47 +127,6 @@ class EmotionFrequencyAnalyzer:
         pn = np.mean(noise_estimate ** 2) + EPS
         return float(10.0 * np.log10(ps / pn))
 
-    def _bandpower_via_rfft(self, x: np.ndarray, fs: float) -> Dict[str, float]:
-        n = x.shape[0]
-        win = np.hanning(n)
-        xw = x * win
-        spec = np.fft.rfft(xw)
-        psd = (np.abs(spec) ** 2) / (np.sum(win ** 2) + EPS)
-        freqs = np.fft.rfftfreq(n, d=1.0 / fs)
-        band_powers: Dict[str, float] = {}
-        for name, (low, high) in self.frequency_bands.items():
-            idx = np.where((freqs >= low) & (freqs <= high))[0]
-            band_powers[name] = float(np.sum(psd[idx]) + EPS) if idx.size else 0.0
-        return band_powers
-
-    def _extract_band_features(self, data_segment: np.ndarray) -> Dict[str, float]:
-        if data_segment.ndim == 2:
-            avg = np.mean(data_segment, axis=0)
-        else:
-            avg = data_segment
-        return self._bandpower_via_rfft(avg, self.fs)
-
-    def _map_bands_to_emotions(self, band_features: Dict[str, float]) -> Tuple[Dict[str, float], str]:
-        total = sum(band_features.values()) + EPS
-        norm = {k: v / total for k, v in band_features.items()}
-        raw_scores: Dict[str, float] = {}
-        for emotion, coeffs in self.emotion_coeffs.items():
-            score = 0.0
-            for band, coeff in coeffs.items():
-                score += coeff * norm.get(band, 0.0)
-            raw_scores[emotion] = score
-        raw_scores['neutral'] = 0.0
-        relu_scores = {k: max(0.0, v) for k, v in raw_scores.items()}
-        vals = np.array(list(relu_scores.values()), dtype=np.float64)
-        if vals.sum() <= EPS:
-            probs = np.ones_like(vals) / len(vals)
-        else:
-            exps = np.exp(vals - np.max(vals))
-            probs = exps / (exps.sum() + EPS)
-        emotion_vector = {k: float(probs[i]) for i, k in enumerate(relu_scores.keys())}
-        primary = max(emotion_vector.items(), key=lambda kv: kv[1])[0]
-        return emotion_vector, primary
-
     def analyze_eeg_to_emotion(self, eeg_input: Union[np.ndarray, Dict[str, np.ndarray]], sampling_rate: int | None = None) -> Dict:
         t0 = time.time()
         if sampling_rate is not None and sampling_rate != self.fs:
@@ -170,32 +144,69 @@ class EmotionFrequencyAnalyzer:
         except Exception:
             filtered = data.copy()
 
-        band_accum = {b: 0.0 for b in self.frequency_bands.keys()}
-        window_count = 0
+        starts: List[int] = []
         start = 0
         while start + self.window_size <= n_samples:
-            seg = filtered[:, start:start + self.window_size]
-            feats = self._extract_band_features(seg)
-            for k, v in feats.items():
-                band_accum[k] += v
-            window_count += 1
+            starts.append(start)
             start += self.hop_size
-        if window_count == 0:
-            feats = self._extract_band_features(filtered)
-            for k, v in feats.items():
-                band_accum[k] += v
-            window_count = 1
+        if not starts:
+            starts = [0]
 
-        band_powers = {k: (v / window_count) for k, v in band_accum.items()}
-        emotion_vector, primary = self._map_bands_to_emotions(band_powers)
-        primary_score = emotion_vector.get(primary, 0.0)
+        band_accum = {b: 0.0 for b in self.frequency_bands.keys()}
+        window_count = 0
+
+        if self.use_multiprocessing and len(starts) >= self.min_windows_for_mp:
+            tasks = []
+            for s in starts:
+                seg = filtered[:, s:s + self.window_size]
+                tasks.append((seg, self.fs, self.frequency_bands))
+            with ProcessPoolExecutor(max_workers=self.max_workers) as exe:
+                futures = [exe.submit(_process_window_worker, t) for t in tasks]
+                for fut in as_completed(futures):
+                    try:
+                        feats = fut.result()
+                        for k, v in feats.items():
+                            band_accum[k] += v
+                        window_count += 1
+                    except Exception:
+                        continue
+        else:
+            for s in starts:
+                seg = filtered[:, s:s + self.window_size]
+                avg = np.mean(seg, axis=0)
+                feats = bandpower_via_rfft(avg, self.fs, self.frequency_bands)
+                for k, v in feats.items():
+                    band_accum[k] += v
+                window_count += 1
+
+        band_powers = {k: (v / max(1, window_count)) for k, v in band_accum.items()}
+        total = sum(band_powers.values()) + EPS
+        norm = {k: v / total for k, v in band_powers.items()}
+
+        raw_scores: Dict[str, float] = {}
+        for emotion, coeffs in self.emotion_coeffs.items():
+            s = 0.0
+            for band, coeff in coeffs.items():
+                s += coeff * norm.get(band, 0.0)
+            raw_scores[emotion] = s
+        raw_scores['neutral'] = 0.0
+        relu_scores = {k: max(0.0, v) for k, v in raw_scores.items()}
+        vals = np.array(list(relu_scores.values()), dtype=np.float64)
+        if vals.sum() <= EPS:
+            probs = np.ones_like(vals) / len(vals)
+        else:
+            exps = np.exp(vals - np.max(vals))
+            probs = exps / (exps.sum() + EPS)
+        emotions = {k: float(probs[i]) for i, k in enumerate(relu_scores.keys())}
+        primary = max(emotions.items(), key=lambda kv: kv[1])[0]
+        primary_score = emotions.get(primary, 0.0)
         snr_factor = min(1.0, max(0.0, (snr_db - self.snr_threshold_db + 6.0) / 12.0))
         confidence = float(primary_score * 0.7 + snr_factor * 0.3)
         if signal_quality == 'reject':
             confidence = min(confidence, 0.25)
 
         return {
-            'emotion_vector': emotion_vector,
+            'emotion_vector': emotions,
             'primary_emotion': primary,
             'band_powers': band_powers,
             'snr_db': float(snr_db),
@@ -213,6 +224,6 @@ class EmotionFrequencyAnalyzer:
 
 
 __all__ = [
-    'EmotionFrequencyAnalyzer',
+    'EmotionFrequencyAnalyzerV2',
 ]
 
