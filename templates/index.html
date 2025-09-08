@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Musical Melody of Emotion - 감정 음악 분석기</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .analysis-section {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .section-title {
+            font-size: 1.5rem;
+            color: #4a5568;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+            padding-left: 15px;
+        }
+        
+        .input-group {
+            margin-bottom: 20px;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #4a5568;
+        }
+        
+        textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        textarea {
+            height: 120px;
+            resize: vertical;
+        }
+        
+        .button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+        }
+        
+        .button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border-left: 4px solid #48bb78;
+        }
+        
+        .result.error {
+            border-left-color: #f56565;
+            background: #fed7d7;
+        }
+        
+        .result-item {
+            margin-bottom: 15px;
+        }
+        
+        .result-item strong {
+            color: #4a5568;
+        }
+        
+        .emotion-scores {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .emotion-score {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .emotion-score .label {
+            font-weight: bold;
+            color: #4a5568;
+            margin-bottom: 5px;
+        }
+        
+        .emotion-score .value {
+            font-size: 1.2rem;
+            color: #667eea;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #4a5568;
+            font-style: italic;
+        }
+        
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+        
+        @media (max-width: 768px) {
+            .two-column {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .container {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎵 Musical Melody of Emotion</h1>
+            <p>한국어 텍스트와 EEG 신호를 통한 감정 분석 및 음악 추천 시스템</p>
+        </div>
+        
+        <div class="two-column">
+            <!-- Korean Text Analysis -->
+            <div class="analysis-section">
+                <h2 class="section-title">🇰🇷 한국어 텍스트 감정 분석</h2>
+                <div class="input-group">
+                    <label for="korean-text">한국어 텍스트를 입력하세요:</label>
+                    <textarea id="korean-text" placeholder="예: 이게 정말 재미있네요! 참 잘했어."></textarea>
+                </div>
+                <button class="button" onclick="analyzeText()">텍스트 분석하기</button>
+                <div id="text-result"></div>
+            </div>
+            
+            <!-- EEG Analysis -->
+            <div class="analysis-section">
+                <h2 class="section-title">🧠 EEG 신호 감정 분석</h2>
+                <div class="input-group">
+                    <label for="signal-type">신호 유형을 선택하세요:</label>
+                    <select id="signal-type">
+                        <option value="joy">기쁨 (Joy) - Alpha/Beta 파형</option>
+                        <option value="sadness">슬픔 (Sadness) - Theta 파형</option>
+                        <option value="anger">분노 (Anger) - Beta/Gamma 파형</option>
+                        <option value="neutral">중립 (Neutral) - 혼합 파형</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="duration">분석 시간 (초):</label>
+                    <select id="duration">
+                        <option value="3">3초</option>
+                        <option value="5" selected>5초</option>
+                        <option value="8">8초</option>
+                        <option value="10">10초</option>
+                    </select>
+                </div>
+                <button class="button" onclick="analyzeEEG()">EEG 분석하기</button>
+                <div id="eeg-result"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function analyzeText() {
+            const textInput = document.getElementById('korean-text');
+            const resultDiv = document.getElementById('text-result');
+            const button = event.target;
+            
+            const text = textInput.value.trim();
+            if (!text) {
+                showResult(resultDiv, 'error', '텍스트를 입력해주세요.');
+                return;
+            }
+            
+            button.disabled = true;
+            resultDiv.innerHTML = '<div class="loading">텍스트를 분석 중입니다...</div>';
+            
+            try {
+                const response = await fetch('/analyze_text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showTextResult(resultDiv, data.result);
+                } else {
+                    showResult(resultDiv, 'error', `오류: ${data.error}`);
+                }
+            } catch (error) {
+                showResult(resultDiv, 'error', `분석 중 오류가 발생했습니다: ${error.message}`);
+            } finally {
+                button.disabled = false;
+            }
+        }
+        
+        async function analyzeEEG() {
+            const signalType = document.getElementById('signal-type').value;
+            const duration = document.getElementById('duration').value;
+            const resultDiv = document.getElementById('eeg-result');
+            const button = event.target;
+            
+            button.disabled = true;
+            resultDiv.innerHTML = '<div class="loading">EEG 신호를 분석 중입니다...</div>';
+            
+            try {
+                const response = await fetch('/analyze_eeg', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        signal_type: signalType, 
+                        duration: parseFloat(duration) 
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showEEGResult(resultDiv, data.result);
+                } else {
+                    showResult(resultDiv, 'error', `오류: ${data.error}`);
+                }
+            } catch (error) {
+                showResult(resultDiv, 'error', `분석 중 오류가 발생했습니다: ${error.message}`);
+            } finally {
+                button.disabled = false;
+            }
+        }
+        
+        function showTextResult(container, result) {
+            const emotions = result.emotions || {};
+            const emotionScores = Object.keys(emotions).map(emotion => 
+                `<div class="emotion-score">
+                    <div class="label">${emotion}</div>
+                    <div class="value">${emotions[emotion].toFixed(2)}</div>
+                </div>`
+            ).join('');
+            
+            container.innerHTML = `
+                <div class="result">
+                    <div class="result-item">
+                        <strong>주요 감정:</strong> ${result.primary_emotion}
+                    </div>
+                    <div class="result-item">
+                        <strong>감정 강도:</strong> ${result.intensity.toFixed(2)}
+                    </div>
+                    <div class="result-item">
+                        <strong>추천 음악 코드:</strong> ${result.music_chord}
+                    </div>
+                    <div class="result-item">
+                        <strong>반어법 감지:</strong> ${result.is_sarcasm ? '예' : '아니오'}
+                    </div>
+                    <div class="result-item">
+                        <strong>추출된 어미:</strong> ${result.morphemes.join(', ') || '없음'}
+                    </div>
+                    ${emotionScores ? `
+                        <div class="result-item">
+                            <strong>감정 점수:</strong>
+                            <div class="emotion-scores">${emotionScores}</div>
+                        </div>
+                    ` : ''}
+                    <div class="result-item">
+                        <strong>처리 시간:</strong> ${result.processing_time_ms.toFixed(2)}ms
+                    </div>
+                </div>
+            `;
+        }
+        
+        function showEEGResult(container, result) {
+            const emotionVector = result.emotion_vector || {};
+            const emotionScores = Object.keys(emotionVector).map(emotion => 
+                `<div class="emotion-score">
+                    <div class="label">${emotion}</div>
+                    <div class="value">${(emotionVector[emotion] * 100).toFixed(1)}%</div>
+                </div>`
+            ).join('');
+            
+            const bandPowers = result.band_powers || {};
+            const bandScores = Object.keys(bandPowers).map(band => 
+                `<div class="emotion-score">
+                    <div class="label">${band.toUpperCase()} 파</div>
+                    <div class="value">${bandPowers[band].toFixed(2)}</div>
+                </div>`
+            ).join('');
+            
+            container.innerHTML = `
+                <div class="result">
+                    <div class="result-item">
+                        <strong>주요 감정:</strong> ${result.primary_emotion}
+                    </div>
+                    <div class="result-item">
+                        <strong>신뢰도:</strong> ${(result.confidence * 100).toFixed(1)}%
+                    </div>
+                    <div class="result-item">
+                        <strong>신호 품질:</strong> ${result.signal_quality}
+                    </div>
+                    <div class="result-item">
+                        <strong>SNR:</strong> ${result.snr_db.toFixed(2)} dB
+                    </div>
+                    <div class="result-item">
+                        <strong>감정 벡터:</strong>
+                        <div class="emotion-scores">${emotionScores}</div>
+                    </div>
+                    <div class="result-item">
+                        <strong>주파수 대역 파워:</strong>
+                        <div class="emotion-scores">${bandScores}</div>
+                    </div>
+                    <div class="result-item">
+                        <strong>처리 시간:</strong> ${result.metadata.processing_time_ms.toFixed(2)}ms
+                    </div>
+                </div>
+            `;
+        }
+        
+        function showResult(container, type, message) {
+            container.innerHTML = `<div class="result ${type}">${message}</div>`;
+        }
+    </script>
+</body>
+</html>
