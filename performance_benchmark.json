@@ -1,0 +1,39 @@
+{
+  "benchmark_run": {
+    "timestamp": "",
+    "hardware": {
+      "cpu": "",
+      "num_cores": 0,
+      "ram_gb": 0
+    },
+    "settings": {
+      "sampling_rate": 512,
+      "window_size": 2048,
+      "hop_size": 1024,
+      "n_channels": 2,
+      "duration_seconds": 10
+    }
+  },
+  "metrics": {
+    "per_window": {
+      "avg_processing_time_ms": 0,
+      "p50_processing_time_ms": 0,
+      "p95_processing_time_ms": 0,
+      "p99_processing_time_ms": 0
+    },
+    "throughput": {
+      "windows_per_second": 0,
+      "concurrent_sessions_supported": 0
+    },
+    "memory_usage_mb": {
+      "baseline": 0,
+      "peak": 0
+    },
+    "cpu_usage_percent": {
+      "avg": 0,
+      "peak": 0
+    },
+    "notes": "Fill with real measurements from your environment."
+  }
+}
+
