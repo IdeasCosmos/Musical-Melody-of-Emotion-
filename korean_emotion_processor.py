@@ -45,14 +45,20 @@ class KoreanEmotionProcessor:
             '반어법': 'E7',  # 긴장/반전 코드
         }
         if KONLPY_AVAILABLE:
-            self.komoran = Komoran()
+            try:
+                self.komoran = Komoran()
+            except Exception as e:
+                print(f"Warning: Failed to initialize Komoran, falling back to regex: {e}")
+                self.komoran = None
+        else:
+            self.komoran = None
 
     def extract_morphemes(self, text: str) -> List[str]:
         """형태소 추출: Konlpy 사용 또는 fallback 정규식.
 
         Fallback에서는 문장 내 어디서든 어미를 탐지합니다(문장부호와 무관).
         """
-        if KONLPY_AVAILABLE:
+        if KONLPY_AVAILABLE and self.komoran is not None:
             return [morph for morph, tag in self.komoran.pos(text) if tag in ('EF', 'EC')]
         # Fallback: 간단 어미 매칭 (문장 끝 고정 아님)
         return re.findall(r'(네요|군요|거든요|잖아요)', text)
