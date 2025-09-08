@@ -79,9 +79,10 @@ class EmotionFrequencyAnalyzer:
             'gamma': (30.0, 100.0),
         }
         self.emotion_coeffs: Dict[str, Dict[str, float]] = {
-            'joy': {'alpha': 0.35, 'beta': 0.25},
+            # 강화된 분리: alpha 중심이면 joy, beta/gamma 중심이면 anger가 우세하도록 조정
+            'joy': {'alpha': 0.45, 'beta': 0.15},
             'sadness': {'alpha': -0.25, 'theta': 0.20},
-            'anger': {'beta': 0.40, 'gamma': 0.25},
+            'anger': {'beta': 0.45, 'gamma': 0.30},
         }
         self.kalman_q = kalman_q
         self.kalman_r = kalman_r
@@ -120,12 +121,30 @@ class EmotionFrequencyAnalyzer:
         return float(snr)
 
     def _band_power_goertzel(self, segment: np.ndarray, band: Tuple[float, float], fs: float, n_freqs: int = 5) -> float:
+        """
+        Compute band power via FFT-based PSD integration (Hann window), replacing
+        the previous Goertzel averaging approach for more accurate band energy.
+        """
         low, high = band
         if high <= low:
             return 0.0
-        freqs = np.linspace(max(0.1, low), min(fs / 2 - 0.1, high), n_freqs)
-        powers = goertzel_power_block(segment, freqs, fs)
-        return float(np.mean(powers) + EPS)
+        n = segment.shape[0]
+        if n <= 1:
+            return 0.0
+        nfft = n
+        win = np.hanning(n)
+        xw = segment * win
+        spec = np.fft.rfft(xw, n=nfft)
+        psd = (np.abs(spec) ** 2) / (np.sum(win ** 2) + EPS)
+        freqs = np.fft.rfftfreq(nfft, d=1.0 / fs)
+        low_c = max(0.0, low)
+        high_c = min(high, fs / 2.0)
+        if high_c <= low_c:
+            return 0.0
+        idx = np.where((freqs >= low_c) & (freqs <= high_c))[0]
+        if idx.size == 0:
+            return 0.0
+        return float(np.sum(psd[idx]) + EPS)
 
     def _extract_band_features(self, data_segment: np.ndarray) -> Dict[str, float]:
         if data_segment.ndim == 2:
