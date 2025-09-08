@@ -82,7 +82,7 @@ class KoreanEmotionProcessor:
         # 감정 강도 계산 (평균)
         if scores:
             total_intensity = sum(scores.values()) / max(1, len(scores))
-            primary_emotion = max(scores, key=scores.get)
+            primary_emotion = max(scores.keys(), key=lambda k: scores[k])
         else:
             total_intensity = 0.0
             primary_emotion = '중립'
